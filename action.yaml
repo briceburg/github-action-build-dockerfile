@@ -1,62 +1,44 @@
 name: build-dockerfile
-description: Cache aware building of Dockerfiles.
+description: Cache aware building and publishing of Dockerfiles.
 
 inputs:
-  args:
+  build-args:
     description: Newline separated build arguments, e.g. "VERSION=foo\nAUTHOR=bar".
-  cache_refs:
-    description: JSON array of refs which will trigger publishing layers to gha cache. Use long lived branches.
-    default: '["refs/heads/main", "refs/heads/master"]'
+  build-secrets:
+    description: Newline separated build secrets, e.g. "VERSION=foo\nAUTHOR=bar".
+  build-target:
+    description: Target stage to build
+  cache-branches:
+    description: JSON array of branches which trigger publishing layers to gha cache. Use long lived branches. E.g. '["main", "master"]'. If empty, uses the default branch.
+    default: '["${{ github.event.repository.default_branch }}"]'
   context:
     description: Docker build context directory. Defaults to "Git context" so you don't need to use actions/checkout, but it will not pickup local changes. Point to a directory to pickup local changes from a checkout, e.g. '.' or './alt/docker/build/path'.
     default: "{{defaultContext}}:."
-  file:
+  dockerfile-path:
     description: Dockerfile path (relative to build context).
     default: Dockerfile
-  image:
-    description: Image name.
-    default: ${{ github.repository }}
+  image-labels:
+    description: Newline list of Image Labels (in name=value format)
+  images:
+    description: Newline list of images (in registry/image-name:tag format)
   platforms:
     description: target platforms to build image(s) for, e.g. 'linux/amd64,linux/arm64'.
     default: linux/amd64
   push:
     description: The string 'true' to push the built image to registry, otherwise the string 'false'.
-    default: "false"
-  registry:
-    description: Registry to publish to.
-    default: ghcr.io
-  registry_username:
-    description: Username
-    default: ${{ github.actor }}
-  registry_token:
-    description: Password
-    required: true
-  secrets:
-    description: Newline separated build secrets, e.g. "VERSION=foo\nAUTHOR=bar".
-  target:
-    description: Target stage to build
-
+    default: 'true'
+  skip-summary:
+    description: The string 'true' to skip writing the job summary, otherwise the string 'false'.
+    default: 'false'
+ 
 outputs:
-  image_digest:
+  image-digest:
     description: Image Digest
     value: ${{ steps.docker-build-push.outputs.digest }}
-  image_name:
-    description: Image Name
-    value: ${{ steps.docker-build-push.outputs.metadata && fromJSON(steps.docker-build-push.outputs.metadata)['image.name'] }}
-  metadata:
-    description: Docker Metadata
-    value: ${{ steps.meta.outputs.json }}
 
 runs:
   using: "composite"
   steps:
-
-  - name: Log in to the Container registry
-    uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20 # v3.1.0
-    with:
-      registry: ${{ inputs.registry }}
-      username: ${{ inputs.registry_username }}
-      password: ${{ inputs.registry_token }}
 
   - name: Set up Docker Buildx
     uses: docker/setup-buildx-action@d70bba72b1f3fd22344832f00baa16ece964efeb # v3.3.0
@@ -65,33 +47,30 @@ runs:
 
   - id: cache # adds a unique cache scope for workflows building multiple images
     run: |
-      echo "scope=${{ inputs.context }}/${{ inputs.file }}" >> $GITHUB_OUTPUT
+      echo "cache-refs: ${{ inputs.cache-refs }}"
+      echo "scope=${{ inputs.context }}/${{ inputs.dockerfile-path }}" >> $GITHUB_OUTPUT
     shell: bash
-
-  - name: Determine Image Metadata (tags, labels)
-    id: meta
-    uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
-    with:
-      images: ${{ inputs.registry }}/${{ inputs.image }}
-      tags: |
-        type=sha,format=long,prefix=
-        type=ref,event=pr
-        type=schedule
-        type=semver,pattern={{raw}}
 
   - id: docker-build-push
     name: Build and Publish Image
-    uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
+    env:
+      DOCKER_BUILD_SUMMARY: ${{ ! inputs.skip-summary == 'true' }}
+    uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # 6.10.0
     with:
-      build-args: ${{ inputs.args }}
+      build-args: ${{ inputs.build-args }}
       cache-from: type=gha,scope=${{ steps.cache.outputs.scope }}
-      cache-to: ${{ contains(fromJSON(inputs.cache_refs), github.ref) && format('type=gha,mode=max,scope={0}', steps.cache.outputs.scope) || '' }}
+      cache-to: ${{ contains(fromJSON(inputs.cache-branches), github.ref_name) && format('type=gha,mode=max,scope={0}', steps.cache.outputs.scope) || '' }}
       context: "${{ inputs.context }}"
-      file: ${{ inputs.file }}
-      labels: ${{ steps.meta.outputs.labels }}
+      file: ${{ inputs.dockerfile-path }}
+      labels: ${{ inputs.image-labels }}
       #load: true # https://github.com/docker/roadmap/issues/371
       platforms: ${{ inputs.platforms }}
       push: ${{ inputs.push }}
-      secrets: ${{ inputs.secrets }}
-      tags: ${{ steps.meta.outputs.tags }}
-      target: ${{ inputs.target }}
+      secrets: |-
+        ${{ inputs.build-secrets }}
+      tags: ${{ inputs.images }}
+      target: ${{ inputs.build-target }}
+
+  - run: |
+      echo "BUILD_DOCKERFILE_IMAGE_DIGEST=${{ steps.docker-build-push.outputs.digest }}" >> $GITHUB_ENV
+    shell: bash
