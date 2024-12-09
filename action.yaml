@@ -54,7 +54,7 @@ runs:
   - id: docker-build-push
     name: Build and Publish Image
     env:
-      DOCKER_BUILD_SUMMARY: ${{ ! inputs.skip-summary == 'true' }}
+      DOCKER_BUILD_SUMMARY: ${{ inputs.skip-summary != 'true' }}
     uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # 6.10.0
     with:
       build-args: ${{ inputs.build-args }}
