@@ -4,20 +4,35 @@ Cache aware building and publishing of Dockerfiles.
 
 ## Usage
 
-Works well with [github-action-detect-image-metadata](https://github.com/briceburg/github-action-detect-image-metadata) to set the image labels and tags.
+Pairs well with [github-action-detect-image-metadata](https://github.com/briceburg/github-action-detect-image-metadata) to set the image labels and tags.
 
 ```yaml
 jobs:
-  build-dockerfile:
+  publish-dockerfile:
     runs-on: ubuntu-latest
     steps:
-    - id: meta
-      uses: briceburg/github-action-detect-image-metadata
-    - uses: briceburg/github-action-build-dockerfile
+    - uses: actions/checkout@v4
       with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
+
+    - name: Gather Image Labels and Tags
+      id: meta
+      uses: briceburg/github-action-detect-image-metadata
+
+    - name: Log in to the Container registry
+      uses: docker/login-action
+      with:
+        registry: ${{ steps.meta.outputs.registry }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and Publish Docker Image
+      uses: briceburg/github-action-build-dockerfile
+      with:
+        context: .
+        dockerfile-path: src/Dockerfile
         image-labels: ${{ steps.meta.outputs.labels }}
         images: ${{ steps.meta.outputs.images }}
-        push: 'true'
 ```
 
 ## Inputs
